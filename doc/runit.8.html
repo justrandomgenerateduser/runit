@@ -4,6 +4,7 @@
 <meta charset="utf-8" />
 <meta name="generator" content="pandoc" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
+<meta name="color-scheme" content="light dark" />
 <title>runit(8)</title>
 </head>
 <body>
@@ -54,6 +55,11 @@ permission set, <strong>runit</strong> is told to shutdown the
 system.</p>
 <p>If <strong>runit</strong> receives an INT signal, a ctrl-alt-del
 keyboard request is triggered.</p>
+<p>If <strong>runit</strong> receives a PWR signal and the file
+<em>/etc/runit/pwrfail</em> exists and has the execute by owner
+permission set, <strong>runit</strong> runs <em>/etc/runit/pwrfail</em>,
+waits for it to terminate, and then sends itself a CONT signal. On
+platforms where PWR is not defined, USR2 is used instead.</p>
 <h3 id="see-also">SEE ALSO</h3>
 <p>runit-init(8), runsvdir(8), runsvchdir(8), sv(8), runsv(8), chpst(8),
 svlogd(8)</p>

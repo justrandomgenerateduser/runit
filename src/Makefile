@@ -30,16 +30,16 @@ svlogd: load svlogd.o pmatch.o fmt_ptime.o unix.a byte.a time.a socket.lib
 chpst: load chpst.o uidgid.o unix.a byte.a
 	./load chpst uidgid.o unix.a byte.a
 
-runit.o: compile sysdeps runit.c
+runit.o: compile sysdeps runit.c runit.h
 	./compile runit.c
 
-runit-init.o: compile runit-init.c
+runit-init.o: compile runit-init.c runit.h
 	./compile runit-init.c
 
-runsv.o: compile sysdeps runsv.c
+runsv.o: compile sysdeps runsv.c runit.h
 	./compile runsv.c
 
-runsvdir.o: compile sysdeps runsvdir.c
+runsvdir.o: compile sysdeps runsvdir.c runit.h
 	./compile runsvdir.c
 
 sv.o: compile sysdeps sv.c
@@ -185,6 +185,9 @@ fmt_ulong.o: compile fmt.h fmt_ulong.c
 hasflock.h: choose compile hasflock.h1 hasflock.h2 load tryflock.c
 	./choose cl tryflock hasflock.h1 hasflock.h2 > hasflock.h
 
+hasinotify.h: choose compile hasinotify.h1 hasinotify.h2 load tryinotify.c
+	./choose cl tryinotify hasinotify.h1 hasinotify.h2 > hasinotify.h
+
 hasmkffo.h: choose compile hasmkffo.h1 hasmkffo.h2 load trymkffo.c
 	./choose cl trymkffo hasmkffo.h1 hasmkffo.h2 > hasmkffo.h
 
@@ -328,7 +331,7 @@ strerr_sys.o: compile error.h strerr.h strerr_sys.c
 subgetopt.o: compile subgetopt.c subgetopt.h
 	./compile subgetopt.c
 
-sysdeps: compile direntry.h hasflock.h hasmkffo.h hassgact.h \
+sysdeps: compile direntry.h hasflock.h hasinotify.h hasmkffo.h hassgact.h \
 hassgprm.h hasunshare.h haswaitp.h iopause.h load select.h systype \
 uint64.h reboot_system.h socket.lib
 	rm -f sysdeps
@@ -344,6 +347,7 @@ uint64.h reboot_system.h socket.lib
 	grep sysdep hasflock.h >>sysdeps
 	grep sysdep reboot_system.h >>sysdeps
 	grep sysdep hasunshare.h >>sysdeps
+	grep sysdep hasinotify.h >>sysdeps
 	cat sysdeps
 
 systype: find-systype.sh trycpp.c x86cpuid.c

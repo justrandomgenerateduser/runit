@@ -14,6 +14,7 @@
 #include <sys/resource.h>
 #include <unistd.h>
 #include <grp.h>
+#include <fcntl.h>
 #include "sgetopt.h"
 #include "error.h"
 #include "strerr.h"
@@ -29,8 +30,10 @@
 #include "open.h"
 #include "openreadclose.h"
 #include "direntry.h"
+#include "coe.h"
+#include "fd.h"
 
-#define USAGE_MAIN " [-vVPFI012] [-u user[:group]] [-U user[:group]] [-b argv0] [-e dir] [-/ root] [-C pwd] [-n nice] [-l|-L lock] [-m n] [-d n] [-o n] [-p n] [-f n] [-c n] [-t n] prog"
+#define USAGE_MAIN " [-vVPFI012N] [-u user[:group]] [-U user[:group]] [-b argv0] [-e dir] [-/ root] [-C pwd] [-n nice] [-l|-L lock] [-A n] [-m n] [-d n] [-o n] [-p n] [-f n] [-c n] [-t n] prog"
 #define FATAL "chpst: fatal: "
 #define WARNING "chpst: warning: "
 
@@ -39,8 +42,11 @@ static stralloc sa;
 char bufnum[FMT_ULONG];
 #ifdef HASUNSHARE
 pid_t pid;
-#endif
 
+void sig_handler(int sig) { kill(pid, sig); }
+void sig_handler_pid1(int sig) { kill(-1, sig); }
+void sig_quit_handler(int unused) { kill(pid, SIGKILL); }
+#endif
 void fatal(const char *m) { strerr_die3sys(111, FATAL, m, ": "); }
 void fatal2(const char *m0, const char *m1) {
   strerr_die5sys(111, FATAL, m0, ": ", m1, ": ");
@@ -58,9 +64,11 @@ char *argv0 =0;
 const char *env_dir =0;
 unsigned int verbose =0;
 unsigned int pgrp =0;
+unsigned int devnull =0;
 unsigned int nostdin =0;
 unsigned int nostdout =0;
 unsigned int nostderr =0;
+int savederr =-1;
 unsigned int newpids =0;
 long limitd =-2;
 long limits =-2;
@@ -76,6 +84,7 @@ long nicelvl =0;
 const char *lock =0;
 const char *root =0;
 const char *pwd =0;
+long alrmsecs =-1;
 unsigned int lockdelay;
 
 void suidgid(char *user, unsigned int ext) {
@@ -274,20 +283,18 @@ void slimit() {
 
 void newpid1() {
 #ifdef HASUNSHARE
-  void sig_handler(int sig) { kill(pid, sig); }
-  void sig_handler_pid1(int sig) { kill(-1, sig); }
-  void sig_quit_handler(int unused) { kill(pid, SIGKILL); }
   int i, w =0;
 
-  for (i =0; i < 32; ++i) sig_catch(i, sig_handler);
-#ifdef SIGRTMIN
-  for (i =SIGRTMIN; i <= SIGRTMAX; ++i) sig_catch(i, sig_handler);
-#endif
-  sig_catch(SIGQUIT, sig_quit_handler);
   if (unshare(CLONE_NEWPID | CLONE_NEWNS) == -1)
     fatal("unable to set namespaces");
   if ((pid =fork()) == -1) fatal("unable to fork new pid 1");
   if (pid) { /* parent, signal relay */
+    for (i =0; i < 32; ++i) sig_catch(i, sig_handler);
+#ifdef SIGRTMIN
+    for (i =SIGRTMIN; i <= SIGRTMAX; ++i) sig_catch(i, sig_handler);
+#endif
+    sig_catch(SIGQUIT, sig_quit_handler);
+    sig_uncatch(sig_child);
     if (wait_pid(&i, pid) == -1) fatal("unable to wait for new pid 1");
     if (verbose) warn("pid1: done");
     _exit(wait_crashed(i) ? 128 + WTERMSIG(i) : wait_exitcode(i));
@@ -297,15 +304,16 @@ void newpid1() {
   if (mount(NULL, "/", NULL, MS_PRIVATE|MS_REC, NULL) == -1)
     if (!root) fatal("pid1: unable to set root mount propagation");
   if (umount2("/proc", MNT_DETACH) == -1)
-    if (errno != EINVAL) fatal("pid1: unable to umount /proc");
+    if ((errno != ENOENT) && (errno != EINVAL))
+      fatal("pid1: unable to umount /proc");
   if (newpids > 1) {
-    for (i =0; i < 32; ++i) sig_catch(i, sig_handler_pid1);
-#ifdef SIGRTMIN
-    for (i =SIGRTMIN; i <= SIGRTMAX; ++i) sig_catch(i, sig_handler_pid1);
-#endif
-    sig_uncatch(sig_child);
     if ((pid =fork()) == -1) fatal("pid1: unable to fork pid 2");
-    if (pid) /* parent, zombies, amialone */
+    if (pid) { /* parent, zombies, amialone */
+      for (i =0; i < 32; ++i) sig_catch(i, sig_handler_pid1);
+#ifdef SIGRTMIN
+      for (i =SIGRTMIN; i <= SIGRTMAX; ++i) sig_catch(i, sig_handler_pid1);
+#endif
+      sig_uncatch(sig_child);
       for (;;) {
         pid_t p;
         if ((p =wait_pid(&i, -1)) == -1) {
@@ -320,15 +328,21 @@ void newpid1() {
           }
         }
       }
+    }
     /* pid 2 */
   }
-  for (i =0; i < 32; ++i) sig_uncatch(i);
-#ifdef SIGRTMIN
-  for (i =SIGRTMIN; i <= SIGRTMAX; ++i) sig_uncatch(i);
-#endif
 #else
   fatalx("unable to set namespaces", "system does not provide unshare()");
 #endif
+}
+
+int dismiss_fd(int fd) {
+  int dn;
+
+  if (! devnull) return close(fd);
+
+  if ((dn =open("/dev/null", O_RDWR)) == -1) return -1;
+  return fd_move(fd, dn);
 }
 
 /* argv[0] */
@@ -360,7 +374,7 @@ int main(int argc, char **argv) {
   if (str_equal(progname, "setlock")) setlock(argc, argv);
   if (str_equal(progname, "softlimit")) softlimit(argc, argv);
 
-  while ((opt =getopt(argc, argv, "u:U:b:e:m:d:o:p:f:c:r:t:/:C:n:l:L:vP012FIV"))
+  while ((opt =getopt(argc, argv, "u:U:b:e:m:d:o:p:f:c:r:t:/:C:n:l:L:A:vP012NFIV"))
          != opteof)
     switch(opt) {
     case 'u': set_user =(char*)optarg; break;
@@ -378,6 +392,7 @@ int main(int argc, char **argv) {
     case 'c': if (optarg[scan_ulong(optarg, &ul)]) usage(); limitc =ul; break;
     case 'r': if (optarg[scan_ulong(optarg, &ul)]) usage(); limitr =ul; break;
     case 't': if (optarg[scan_ulong(optarg, &ul)]) usage(); limitt =ul; break;
+    case 'A': if (optarg[scan_ulong(optarg, &ul)]) usage(); alrmsecs =(long)ul; break;
     case '/': root =optarg; break;
     case 'C': pwd =optarg; break;
     case 'n':
@@ -397,6 +412,7 @@ int main(int argc, char **argv) {
     case 'l': if (lock) usage(); lock =optarg; lockdelay =1; break;
     case 'L': if (lock) usage(); lock =optarg; lockdelay =0; break;
     case 'v': verbose =1; break;
+    case 'N': devnull =1; break;
     case 'P': pgrp =1; break;
     case '0': nostdin =1; break;
     case '1': nostdout =1; break;
@@ -422,18 +438,28 @@ int main(int argc, char **argv) {
     errno =0;
     if (nice(nicelvl) == -1) if (errno) fatal("unable to set nice level");
   }
+  if (alrmsecs >= 0) alarm((unsigned int)alrmsecs);
   if (newpids) newpid1();
   if (env_user) euidgid(env_user, 1);
   if (set_user) suidgid(set_user, 1);
   if (lock) slock(lock, lockdelay, 0);
-  if (nostdin) if (close(0) == -1) fatal("unable to close stdin");
-  if (nostdout) if (close(1) == -1) fatal("unable to close stdout");
-  if (nostderr) if (close(2) == -1) fatal("unable to close stderr");
+  if (nostderr) {
+    if ((savederr = dup(2)) == -1) fatal("unable to save stderr");
+    coe(savederr);
+    if (dismiss_fd(2) == -1) fatal("unable to close stderr");
+  }
+  if (nostdout) if (dismiss_fd(1) == -1) fatal("unable to close stdout");
+  if (nostdin) if (dismiss_fd(0) == -1) fatal("unable to close stdin");
   slimit();
 
   progname =*argv;
   if (argv0) *argv =argv0;
   pathexec_env_run(progname, argv);
+  if (savederr >= 0) {
+    int e = errno;
+    fd_move(2, savederr);
+    errno = e;
+  }
   fatal2("unable to run", *argv);
   return(0);
 }

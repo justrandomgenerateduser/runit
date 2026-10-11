@@ -1,8 +1,8 @@
-usage: chpst [-vVPFI012] [-u user[:group]] [-U user[:group]] [-b argv0] [-e dir] [-/ root] [-C pwd] [-n nice] [-l|-L lock] [-m n] [-d n] [-o n] [-p n] [-f n] [-c n] [-t n] prog
+usage: chpst [-vVPFI012N] [-u user[:group]] [-U user[:group]] [-b argv0] [-e dir] [-/ root] [-C pwd] [-n nice] [-l|-L lock] [-A n] [-m n] [-d n] [-o n] [-p n] [-f n] [-c n] [-t n] prog
 
 100
-$Id: f63dd32831de12538463234394807e4ad186d935 $
-usage: chpst [-vVPFI012] [-u user[:group]] [-U user[:group]] [-b argv0] [-e dir] [-/ root] [-C pwd] [-n nice] [-l|-L lock] [-m n] [-d n] [-o n] [-p n] [-f n] [-c n] [-t n] prog
+$Id: f5556d628e1763c035e903d7d01ffe0806c5e3e7 $
+usage: chpst [-vVPFI012N] [-u user[:group]] [-U user[:group]] [-b argv0] [-e dir] [-/ root] [-C pwd] [-n nice] [-l|-L lock] [-A n] [-m n] [-d n] [-o n] [-p n] [-f n] [-c n] [-t n] prog
 
 100
 test=1
@@ -10,4 +10,11 @@ test=1
 0
 0
 0
+0
+111
+chpst: fatal: unable to run: ./ENOENT.err: file does not exist
+0
+111
+chpst: fatal: unable to run: ./ENOENT.err: file does not exist
+ALRM
 0
